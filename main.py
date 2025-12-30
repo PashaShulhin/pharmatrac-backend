@@ -11,7 +11,7 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Модель таблиці
+# 2. Модель таблиці (ОНОВЛЕНО: додано serial_number)
 class DrugDB(Base):
     __tablename__ = "inventory"
     id = Column(Integer, primary_key=True, index=True)
@@ -20,10 +20,10 @@ class DrugDB(Base):
     expiryDate = Column(String)
     location = Column(String)
     status = Column(String)
+    serial_number = Column(String) # Нове поле для стартапу!
 
 Base.metadata.create_all(bind=engine)
 
-# 3. Ініціалізація FastAPI (ЦЕ ВИПРАВЛЯЄ NameError)
 app = FastAPI()
 
 app.add_middleware(
@@ -47,23 +47,23 @@ def get_inventory(db: Session = Depends(get_db)):
 
 @app.post("/api/inventory")
 def add_drug(drug: Dict[Any, Any], db: Session = Depends(get_db)):
-    # Друкуємо дані для перевірки в терміналі
     print("\n--- ОТРИМАНІ ДАНІ ВІД REACT ---")
     print(drug)
     print("-------------------------------\n")
     
-    # Використовуємо вашу логіку гнучкого пошуку полів
     new_drug = DrugDB(
-    name=drug.get("name"),
-    quantity=int(drug.get("quantity", 0)), # Перетворюємо на ціле число
-    expiryDate=drug.get("expiryDate") or drug.get("expiry_date"),
-    location=drug.get("location"),
-    status=drug.get("status", "in-stock")
-)
+        name=drug.get("name"),
+        quantity=int(drug.get("quantity", 0)),
+        expiryDate=drug.get("expiryDate") or drug.get("expiry_date"),
+        location=drug.get("location"),
+        status=drug.get("status", "in-stock"),
+        serial_number=drug.get("serial_number") # Приймаємо номер від фронтенда
+    )
     db.add(new_drug)
     db.commit()
     db.refresh(new_drug)
     return new_drug
+
 @app.delete("/api/inventory/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
     db_item = db.query(DrugDB).filter(DrugDB.id == item_id).first()
