@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
@@ -11,7 +11,7 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. Модель таблиці (ОНОВЛЕНО: додано serial_number)
+# 2. Модель таблиці
 class DrugDB(Base):
     __tablename__ = "inventory"
     id = Column(Integer, primary_key=True, index=True)
@@ -20,10 +20,11 @@ class DrugDB(Base):
     expiryDate = Column(String)
     location = Column(String)
     status = Column(String)
-    serial_number = Column(String) # Нове поле для стартапу!
+    serialNumber = Column(String) # Змінено на serialNumber для прямої сумісності з React
 
 Base.metadata.create_all(bind=engine)
 
+# 3. Ініціалізація додатка (МАЄ БУТИ ТУТ)
 app = FastAPI()
 
 app.add_middleware(
@@ -33,6 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dependency для отримання сесії БД
 def get_db():
     db = SessionLocal()
     try:
@@ -40,29 +42,41 @@ def get_db():
     finally:
         db.close()
 
-# 4. Маршрути
+# 4. Маршрути (CRUD)
+
 @app.get("/api/inventory")
 def get_inventory(db: Session = Depends(get_db)):
     return db.query(DrugDB).all()
 
 @app.post("/api/inventory")
 def add_drug(drug: Dict[Any, Any], db: Session = Depends(get_db)):
-    print("\n--- ОТРИМАНІ ДАНІ ВІД REACT ---")
-    print(drug)
-    print("-------------------------------\n")
-    
     new_drug = DrugDB(
         name=drug.get("name"),
         quantity=int(drug.get("quantity", 0)),
-        expiryDate=drug.get("expiryDate") or drug.get("expiry_date"),
+        expiryDate=drug.get("expiryDate"),
         location=drug.get("location"),
         status=drug.get("status", "in-stock"),
-        serial_number=drug.get("serial_number") # Приймаємо номер від фронтенда
+        serialNumber=drug.get("serialNumber") # React надсилає serialNumber
     )
     db.add(new_drug)
     db.commit()
     db.refresh(new_drug)
     return new_drug
+
+@app.put("/api/inventory/{item_id}")
+def update_item(item_id: int, updated_data: Dict[Any, Any], db: Session = Depends(get_db)):
+    db_item = db.query(DrugDB).filter(DrugDB.id == item_id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    # Оновлюємо поля
+    for key, value in updated_data.items():
+        if hasattr(db_item, key):
+            setattr(db_item, key, value)
+    
+    db.commit()
+    db.refresh(db_item)
+    return db_item
 
 @app.delete("/api/inventory/{item_id}")
 def delete_item(item_id: int, db: Session = Depends(get_db)):
@@ -71,4 +85,4 @@ def delete_item(item_id: int, db: Session = Depends(get_db)):
         db.delete(db_item)
         db.commit()
         return {"ok": True}
-    return {"error": "Not found"}
+    raise HTTPException(status_code=404, detail="Not found")
